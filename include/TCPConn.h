@@ -16,7 +16,8 @@ public:
    ~TCPConn();
 
    // The current status of the connection
-   enum statustype { s_none, s_connecting, s_connected, s_datatx, s_datarx, s_waitack, s_hasdata };
+   enum statustype { s_none, s_connecting, s_connected, s_authenticating_client, s_waiting_for_challenge,
+	   	   	   	   	   s_datatx, s_datarx, s_waitack, s_hasdata };
 
    statustype getStatus() { return _status; };
 
@@ -72,6 +73,8 @@ protected:
    // Functions to execute various stages of a connection 
    void sendSID();
    void waitForSID();
+   void waitForChallengeBack();
+   void waitForChallenge();
    void transmitData();
    void waitForData();
    void awaitAck();
@@ -94,7 +97,7 @@ private:
 
    bool _connected = false;
 
-   std::vector<uint8_t> c_rep, c_endrep, c_auth, c_endauth, c_ack, c_sid, c_endsid;
+   std::vector<uint8_t> c_rep, c_endrep, c_auth, c_endauth, c_ack, c_sid, c_endsid, c_off, c_endoff;
 
    statustype _status = s_none;
 

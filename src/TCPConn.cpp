@@ -170,47 +170,119 @@ void TCPConn::encryptData(std::vector<uint8_t> &buf) {
 void TCPConn::handleConnection() {
 
    try {
-      switch (_status) {
+		switch (_status) {
 
-         // Client: Just connected, send our SID
-         case s_connecting:
-            sendSID();
-            break;
+		// Client: Just connected, send our SID
+		case s_connecting:
+			sendSID();
+			break;
 
-         // Server: Wait for the SID from a newly-connected client, then send our SID
-         case s_connected:
-            waitForSID();
-            break;
-   
-         // Client: connecting user - replicate data
-         case s_datatx:
-            transmitData();
-            break;
+		// Client:
+		case s_waiting_for_challenge:
+			waitForChallenge();
+			break;
 
-         // Server: Receive data from the client
-         case s_datarx:
-            waitForData();
-            break;
-   
-         // Client: Wait for acknowledgement that data sent was received before disconnecting
-         case s_waitack:
-            awaitAck();
-            break;
-         
-         // Server: Data received and conn disconnected, but waiting for the data to be retrieved
-         case s_hasdata:
-            break;
+		// Server: Wait for the SID from a newly-connected client, then send our SID
+		case s_connected:
+			waitForSID();
+			break;
 
-         default:
-            throw std::runtime_error("Invalid connection status!");
-            break;
-      }
-   } catch (socket_error &e) {
-      std::cout << "Socket error, disconnecting.\n";
-      disconnect();
-      return;
+		//Server:
+		case s_authenticating_client:
+			waitForChallengeBack();
+			break;
+
+		// Client: connecting user - replicate data
+		case s_datatx:
+			transmitData();
+			break;
+
+		// Server: Receive data from the client
+		case s_datarx:
+			waitForData();
+			break;
+
+		// Client: Wait for acknowledgement that data sent was received before disconnecting
+		case s_waitack:
+			awaitAck();
+			break;
+
+		// Server: Data received and conn disconnected, but waiting for the data to be retrieved
+		case s_hasdata:
+			break;
+
+		default:
+			throw std::runtime_error("Invalid connection status!");
+			break;
+		}
+	} catch (socket_error &e) {
+		std::cout << "Socket error, disconnecting.\n";
+		disconnect();
+		return;
+	}
+
+}
+/**********************************************************************************************
+ * waitForChallenge()  - receives the clear challenge and sends it back encrypted
+ *
+ *    Throws: socket_error for network issues, runtime_error for unrecoverable issues
+ **********************************************************************************************/
+void TCPConn::waitForChallenge() {
+   // If data on the socket, should be unencrypted challenge string. We encrypt and send back
+   if (_connfd.hasData()) {
+	  std::vector<uint8_t> buf;
+
+	  if (!getData(buf))
+		 return;
+
+	  if (!getCmdData(buf, c_sid, c_endsid)) {
+		 std::stringstream msg;
+		 msg << "SID string from connecting client invalid format. Cannot authenticate.";
+		 _server_log.writeLog(msg.str().c_str());
+		 disconnect();
+		 return;
+	  }
+
+	  std::vector<uint8_t> challenge(buf.begin(), buf.end());
+
+	  //encrypt and return encrypted challenge
+      encryptData(challenge);
+      wrapCmd(challenge,c_sid,c_endsid);
+      sendData(challenge);
+
+      _status = s_datatx;
    }
+}
 
+/**********************************************************************************************
+ * waitForChallengeBack() - receives the encrypted challenge and verifies that it was what was sent
+ *
+ *    Throws: socket_error for network issues, runtime_error for unrecoverable issues
+ **********************************************************************************************/
+void TCPConn::waitForChallengeBack() {
+   // If data on the socket, should be our Auth string nicely encrypted from our client server
+   if (_connfd.hasData()) {
+      std::vector<uint8_t> buf;
+
+      if (!getData(buf))
+         return;
+
+      if (!getCmdData(buf, c_sid, c_endsid)) {
+         std::stringstream msg;
+         msg << "Encrypted Challenge string from connecting client invalid format. Cannot authenticate.";
+         _server_log.writeLog(msg.str().c_str());
+         disconnect();
+         return;
+      }
+
+      decryptData(buf);
+      std::string decryptedChallenge(buf.begin(), buf.end());
+
+      //here we have to test to ensure we got the encrypted challenge back correctly
+
+      setNodeID(decryptedChallenge.c_str());
+      _status = s_datarx;
+   }
 }
 
 /**********************************************************************************************
@@ -224,7 +296,7 @@ void TCPConn::sendSID() {
    wrapCmd(buf, c_sid, c_endsid);
    sendData(buf);
 
-   _status = s_datatx; 
+   _status = s_datatx;
 }
 
 /**********************************************************************************************
@@ -252,6 +324,10 @@ void TCPConn::waitForSID() {
 
       std::string node(buf.begin(), buf.end());
       setNodeID(node.c_str());
+
+      //JB: append random string challenge to the _svr_id to make this more interesting
+      //std::string sb;
+      //_svr_id += genRandString(sb, 13);
 
       // Send our Node ID
       buf.assign(_svr_id.begin(), _svr_id.end());
@@ -621,4 +697,3 @@ const char *TCPConn::getIPAddrStr(std::string &buf) {
    _connfd.getIPAddrStr(buf);
    return buf.c_str();
 }
-

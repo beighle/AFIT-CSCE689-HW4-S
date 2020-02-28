@@ -23,10 +23,11 @@ ReplServer::ReplServer(DronePlotDB &plotdb, float time_mult)
                                _ip_addr("127.0.0.1"),
                                _port(9999)
 {
+   _start_time = time(NULL);
 }
 
-ReplServer::ReplServer(DronePlotDB &plotdb, const char *ip_addr, unsigned short port, float time_mult,
-                                          unsigned int verbosity)
+ReplServer::ReplServer(DronePlotDB &plotdb, const char *ip_addr, unsigned short port, int offset, 
+                        float time_mult, unsigned int verbosity)
                                  :_queue(verbosity),
                                   _plotdb(plotdb),
                                   _shutdown(false), 
@@ -36,6 +37,7 @@ ReplServer::ReplServer(DronePlotDB &plotdb, const char *ip_addr, unsigned short 
                                   _port(port)
 
 {
+   _start_time = time(NULL) + offset;
 }
 
 ReplServer::~ReplServer() {
@@ -203,9 +205,53 @@ void ReplServer::addReplDronePlots(std::vector<uint8_t> &data) {
       dptr += DronePlot::getDataSize();      
    }
    if (_verbosity >= 2)
-      std::cout << "Replicated in " << count << " plots\n";   
+      std::cout << "Replicated in " << count << " plots\n";
+
+   //performDbSync();
 }
 
+/**********************************************************************************************
+ * performDbSync - Performs global plotdb synchronization via readYourWrites
+ *                 Performs this function every time a Rep action occurs (once every 20 secs)
+ *                 Eliminates dupe conflicts flags all items as DBFLAG_SYNCD
+ *
+ * Params:
+ **********************************************************************************************/
+void ReplServer::performDbSync()
+{
+
+	_plotdb.sortByTime();
+
+    //loop through the first time to sync all plot data despite what node it came from
+	for(auto i = _plotdb.begin(); i != _plotdb.end(); i++)
+    {
+    	//grab the global offset from item 1
+    	int offset = i->timestamp;
+    	continue;
+
+        if(!i->isFlagSet(DBFLAG_SYNCD))
+        {
+        	//create a new plot item. We'll set its flag in the eliminate dupes loop below
+        	_plotdb.addPlot(i->drone_id, i->node_id, i->timestamp-offset, i->latitude, i->longitude);
+        	//erase the old one
+        	_plotdb.erase(i);
+        }
+    }
+    //now loop through again and check for dupes. Also flag all items as DBFLAG_SYNCD
+	for(auto i = _plotdb.begin(); i != _plotdb.end(); i++)
+    {
+		i->setFlags(DBFLAG_SYNCD);
+        for(auto j = _plotdb.begin(); j != _plotdb.end(); j++)
+        {
+            if((i->latitude == j->latitude) && (i->longitude == j->longitude))
+            {
+            	//erase the old one
+            	_plotdb.erase(j);
+            	break;
+            }
+        }
+    }
+}
 
 /**********************************************************************************************
  * addSingleDronePlot - Takes in binary serialized drone data and adds it to the database. 
@@ -217,6 +263,13 @@ void ReplServer::addSingleDronePlot(std::vector<uint8_t> &data) {
 
    tmp_plot.deserialize(data);
 
+   /*
+   call method that checks things...
+   	-if first plot (from node 1) then capture and record node1's offset
+	-set this global offset to be applied where?
+
+
+	*/
    _plotdb.addPlot(tmp_plot.drone_id, tmp_plot.node_id, tmp_plot.timestamp, tmp_plot.latitude,
                                                          tmp_plot.longitude);
 }

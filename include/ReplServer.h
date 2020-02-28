@@ -17,7 +17,7 @@
 class ReplServer 
 {
 public:
-   ReplServer(DronePlotDB &plotdb, const char *ip_addr, unsigned short port,
+   ReplServer(DronePlotDB &plotdb, const char *ip_addr, unsigned short port, int offset,
                               float _time_mult = 1.0, unsigned int verbosity = 1);
    ReplServer(DronePlotDB &plotdb, float _time_mult = 1.0);
    virtual ~ReplServer();
@@ -37,6 +37,7 @@ private:
 
    void addReplDronePlots(std::vector<uint8_t> &data);
    void addSingleDronePlot(std::vector<uint8_t> &data);
+   void performDbSync();
 
    unsigned int queueNewPlots();
 
